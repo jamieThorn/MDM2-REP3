@@ -14,6 +14,11 @@ from sklearn.metrics import f1_score
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 import seaborn as sns
+from sklearn.model_selection import LeaveOneOut
+from sklearn.model_selection import cross_val_score
+from numpy import mean
+from numpy import std
+from sklearn.metrics import confusion_matrix
 
 
 def importData():
@@ -79,11 +84,18 @@ def t_sne(X,y,data):
                    , c = color
                    , s = 50)
     ax.legend(targets)
-    ax.grid()    
-            
+    ax.grid()   
+    
+def crossVal(X,y,svm):
+    
+    cv = LeaveOneOut()
+    scores = cross_val_score(svm, X, y, scoring='accuracy', cv=cv, n_jobs=-1)
+    print('Accuracy: %.3f (%.3f)' % (mean(scores), std(scores)))
+
 def svm(X,y):
     X_train, X_test, y_train, y_test = model_selection.train_test_split(X, y, train_size=0.50, test_size=0.50)
-    rbf = SVC(kernel='rbf', gamma=0.1, C=1,probability=True).fit(X_train, y_train)
+    rbf = SVC(kernel='rbf', gamma=0.1, C=1,probability=True, class_weight='balanced').fit(X_train, y_train)
+    rbf_penalised = SVC(kernel='rbf', gamma='scale', C=1,probability=True ).fit(X_train, y_train)
     rbf_pred = rbf.predict(X_test)
     rbf_accuracy = accuracy_score(y_test, rbf_pred)
     rbf_probabilities = rbf.predict_proba(X_test)
@@ -98,6 +110,8 @@ def svm(X,y):
     rbf_results['sample_id'] = y_test.index
     rbf_results.set_index('sample_id', inplace = True)
     rbf_results['confidence'] = rbf_confidence_score
+    crossVal(X,y,rbf)
+    print(confusion_matrix(y_test,rbf_pred))
     return y_test,rbf_results
 
 def typeAnalysis(expected, results, data):
@@ -112,8 +126,9 @@ def typeAnalysis(expected, results, data):
     for each in counts:
         diagnosed = (predicted_cancer['type'] == each).sum()
         total = (testpatients['stage'] == each).sum()
-        counts[each] = diagnosed/total
+        counts[each] = diagnosed/total * 100
     plt.figure(figsize=(15,5))
+    plt.grid()
     plt.bar(counts.keys(), counts.values(), width=.5, color='b')
 def main():
     dataset = importData()
