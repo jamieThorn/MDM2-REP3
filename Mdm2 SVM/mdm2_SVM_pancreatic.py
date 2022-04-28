@@ -6,6 +6,7 @@ Created on Tue Mar  8 12:55:26 2022
 @author: jamiethorn
 """
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.svm import SVC
 import sklearn.model_selection as model_selection
@@ -22,9 +23,11 @@ from sklearn.metrics import confusion_matrix
 
 
 def importData():
+    
     data = pd.read_csv("Debernardi et al 2020 data.csv")
     data['sex'] = data['sex'].map({'F': 1, 'M': 0})
     return data
+        
     
 def formatData(data):
     #X represents the set of training data seperated from the
@@ -36,9 +39,15 @@ def formatData(data):
     y.replace(to_replace = [1,2], value = 0, inplace = True)
     y.replace(to_replace = 3, value = 1,  inplace = True)
     return X_raw,y
+
+
 def normalise(X_raw):
+    
     return (X_raw-X_raw.min())/ (X_raw.max() - X_raw.min())
+
+
 def pca(X,y,data):
+    
     pca = PCA(n_components=2)
     principalComponents = pca.fit_transform(X)
     principalDf = pd.DataFrame(data = principalComponents
@@ -64,6 +73,7 @@ def pca(X,y,data):
 
 
 def t_sne(X,y,data):
+    
     tsne = TSNE(n_components=2, verbose=1, perplexity=40, n_iter=800)
     tsne_results = tsne.fit_transform(X)
     df = pd.DataFrame(data = tsne_results, columns = ['tsne comp 1', 'tsne comp 2'])
@@ -86,21 +96,27 @@ def t_sne(X,y,data):
     ax.legend(targets)
     ax.grid()   
     
+    
 def crossVal(X,y,svm):
     
     cv = LeaveOneOut()
     scores = cross_val_score(svm, X, y, scoring='accuracy', cv=cv, n_jobs=-1)
     print('Accuracy: %.3f (%.3f)' % (mean(scores), std(scores)))
-
-def svm(X,y):
+    
+    
+def split_data(X,y):
+    
     X_train, X_test, y_train, y_test = model_selection.train_test_split(X, y, train_size=0.50, test_size=0.50)
-    rbf = SVC(kernel='rbf', gamma=0.1, C=1,probability=True, class_weight='balanced').fit(X_train, y_train)
-    rbf_penalised = SVC(kernel='rbf', gamma='scale', C=1,probability=True ).fit(X_train, y_train)
+    return X_train, X_test, y_train, y_test
+
+
+def svm(X_train, X_test, y_train, y_test):
+    
+    rbf = SVC(kernel='rbf', gamma=0.1, C=1,probability=True).fit(X_train, y_train)
     rbf_pred = rbf.predict(X_test)
     rbf_accuracy = accuracy_score(y_test, rbf_pred)
     rbf_probabilities = rbf.predict_proba(X_test)
     rbf_confidence_score = []
-    print(X_train)
     for each in rbf_probabilities:
         #negative score denotes more confidence in not cancerous and vice versa
         score = each[1]-each[0]
@@ -110,11 +126,33 @@ def svm(X,y):
     rbf_results['sample_id'] = y_test.index
     rbf_results.set_index('sample_id', inplace = True)
     rbf_results['confidence'] = rbf_confidence_score
-    crossVal(X,y,rbf)
     print(confusion_matrix(y_test,rbf_pred))
-    return y_test,rbf_results
+    return y_test,rbf_results,rbf_accuracy
+
+def penalised_svm(X_train, X_test, y_train, y_test):
+    
+    rbf = SVC(kernel='rbf', gamma=0.3, C=1,probability=True, class_weight={0:0.25,1:0.75}).fit(X_train, y_train)
+    rbf_pred = rbf.predict(X_test)
+    rbf_accuracy = accuracy_score(y_test, rbf_pred)
+    rbf_probabilities = rbf.predict_proba(X_test)
+    rbf_confidence_score = []
+    for each in rbf_probabilities:
+        #negative score denotes more confidence in not cancerous and vice versa
+        score = each[1]-each[0]
+        rbf_confidence_score.append(score)
+    print('Accuracy (RBF Kernel): ', "%.2f" % (rbf_accuracy*100))
+    rbf_results = pd.DataFrame(data = rbf_pred, columns = ['results'])
+    rbf_results['sample_id'] = y_test.index
+    rbf_results.set_index('sample_id', inplace = True)
+    rbf_results['confidence'] = rbf_confidence_score
+    print(confusion_matrix(y_test,rbf_pred))
+    return y_test,rbf_results,rbf_accuracy, confusion_matrix(y_test,rbf_pred)
+
+    
+
 
 def typeAnalysis(expected, results, data):
+    
     data.set_index("sample_id", inplace = True)
     ids = list(expected.index)
     comparison = pd.concat([expected, results], axis = 1)
@@ -130,13 +168,31 @@ def typeAnalysis(expected, results, data):
     plt.figure(figsize=(15,5))
     plt.grid()
     plt.bar(counts.keys(), counts.values(), width=.5, color='b')
+    
+def aggregate_training(X,y,runs):
+    raw_Score = 0
+    types = pd.DataFrame()
+    con = np.zeros((2,2))
+    for r in range(0,runs):
+        X_train, X_test, y_train, y_test = split_data(X, y)
+        expected,results,accuracy, confusion = penalised_svm(X_train, X_test, y_train, y_test)
+        raw_Score+=accuracy
+        con+=confusion
+    average = raw_Score/runs
+    print(average*100)
+    print(con)
 def main():
+    
     dataset = importData()
     X_raw,y = formatData(dataset)
     X = normalise(X_raw)
-    expected,results = svm(X,y)
+    X_train, X_test, y_train, y_test = split_data(X, y)
+    expected,results,accuracy = svm(X_train, X_test, y_train, y_test)
+    expect_p,reults_p, accuracy_p,con = penalised_svm(X_train, X_test, y_train, y_test)
+    aggregate_training(X,y,1000)
     pca(X,y,dataset)
     t_sne(X,y,dataset)
     typeAnalysis(expected, results,dataset)
+    
 main()
         
